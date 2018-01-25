@@ -8,11 +8,9 @@ pkt_per_sec = config.source_packets_per_sec
 bs = config.source_to_switch_push_speed
 bss = config.switch_to_sink_push_speed
 
-
 sources = []
 events = {}
-packets = []
-total_pkt_in_queue = 0
+total_pkt_in_queue = 1
 
 def validate():
 	assert bs > pkt_size * pkt_per_sec 
@@ -25,19 +23,22 @@ def pushEvent(ev):
 	else:
 		events[time].append(ev)
 
+delay = 0.0
+
 def processEvent(ev):
-	global pkt_size, bs, bss, total_pkt_in_queue, sources, total_pkt_in_queue
+	global pkt_size, bs, bss, total_pkt_in_queue, sources, delay
 
 	source_id = ev.source_id
 	pkt_id = ev.pkt_id
 	time = ev.time
 	state = ev.state
-
 	if ev.state == 0:
 		time += pkt_size / bs
 	elif ev.state == 1:
 		sources[source_id].packets[pkt_id].setSwitchReachingTime(time)
+		delay -= time
 		time += total_pkt_in_queue * pkt_size / bss
+		delay += time
 		total_pkt_in_queue += 1
 		new_pkt_id, new_pkt_gen_time = sources[source_id].generatePacket()
 		pushEvent(models.Event(source_id, new_pkt_id, new_pkt_gen_time))
@@ -61,12 +62,12 @@ def main():
 		new_src = models.Source(i, start_time)
 		sources.append(new_src)
 		pkt_id, gen_time = new_src.generatePacket()
-		print "Source ", i, "at ", start_time, pkt_id, gen_time
+		# print "Source ", i, "at ", start_time, pkt_id, gen_time
 
 		ev = models.Event(i, pkt_id, gen_time, 0)
 		pushEvent(ev)
 
-	for i in range(100):
+	for i in range(1000):
 		global events
 
 		keys = events.keys()
@@ -75,8 +76,28 @@ def main():
 		values = events[key]
 		del events[key]
 		values.sort()
-		for ev in values:
-			processEvent(ev)
+		for evv in values:
+			processEvent(evv)
+	
+	global delay
+
+	for src in sources:
+		packets = src.packets
+		for pkt_id in packets.keys():
+			if packets[pkt_id].status < 2:
+				continue
+			pkt = packets[pkt_id]
+			delay += pkt.switchLeavingTime - pkt.switchReachingTime
+
+
+	print delay
 
 if __name__ == '__main__':
-	main()
+
+	while bss > 1:
+		# bss = config.source_to_switch_push_speed + i
+		sources = []
+		events = {}
+		total_pkt_in_queue = 1
+		main()
+		bss -= 1
